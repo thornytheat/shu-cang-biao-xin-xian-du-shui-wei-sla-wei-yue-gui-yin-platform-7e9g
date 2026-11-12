@@ -15,9 +15,9 @@
 | 模块 | 页面 | 说明 |
 | --- | --- | --- |
 | 新鲜度看板 | `/board` | 40 张表按 P0/P1/P2 分栏，三色灯 + 条带水位条；一键运行今日探测 |
-| 表详情 | `/tables/:code` | 近 30 天延迟曲线（SVG 手绘）、P50/P90/P95、上游链逐跳延迟、该表违约记录 |
+| 表详情 | `/tables/:code` | 近 30 天延迟曲线（SVG 手绘）、P50/P90/P95、上游链逐跳延迟、该表违约记录；按分区补录实际就绪时间（补采迟到对账） |
 | SLA 策略 | `/policies` | 三档容忍分钟 / 连续升级阈值 / 通知口径；近 30 天真实回放试算 |
-| 违约台账 | `/breaches` | 筛选、上游归因（主因表 + 贡献%）、认领、复盘、导出复盘 CSV / Markdown |
+| 违约台账 | `/breaches` | 筛选、上游归因（主因表 + 贡献%）、认领、复盘、导出复盘 CSV / Markdown；误违约作废留痕 |
 | 登录 | `/login` | 三角色，低权角色调高权接口返回真实 403 |
 
 ### 两个后端真算算法（前端只展示，不硬编码）
@@ -45,6 +45,19 @@ ratio > 1.0 → 违约(warning)；ratio > 2.0 → 严重(severe)
       无上游登记 → self；全链路无就绪事件 → undetermined
 影响分 = 0.45×贡献% + 0.35×min(100, 影响报表数×10) + 0.20×min(100, ratio/2×100)
         示例：贡献 62.0% / 7 张报表 / ratio 1.6 → 68.4
+```
+
+**补采迟到对账**（`POST /api/tables/{code}/backfill` + 重跑检测）
+
+```
+补采（就绪事件采集）偶尔迟到：先按旧延迟判了违约，实际就绪事件随后才到。
+补录 = 按分区写回实际就绪时间（source=backfill，延迟同口径归一，巡检不覆盖），
+随后自动重跑检测，该日及后续连续天数全量重算：
+  仍是候选   → 正常 upsert；已作废的复活（revive）
+  不再是候选 → 误违约：未处置(open) 删除（从待办消失）；
+              已认领/已复盘 标作废（voided_at + void_reason，保留处置痕迹）
+幂等：重复运行不新增记录、不重复作废、不重复升级（连续次数由扫描全量重算）。
+口径：看板 / 详情 / 汇总 / 导出只计有效违约；作废记录仅台账「含已作废」可见。
 ```
 
 ## 快速启动
@@ -199,6 +212,7 @@ npm run dev          # http://localhost:5173，/api 代理到 19254
 POST /api/auth/login                  GET  /api/auth/me
 GET  /api/tables                      GET  /api/tables/{code}
 GET  /api/tables/{code}/freshness     PATCH /api/tables/{code}          (admin)
+POST /api/tables/{code}/backfill      (admin/ops，补录就绪时间并重算违约)
 GET  /api/dashboard/health
 POST /api/probes/run                  (admin/ops)  GET /api/probes/status  GET /api/probes
 GET  /api/policies                    PATCH /api/policies/{tier} (admin)

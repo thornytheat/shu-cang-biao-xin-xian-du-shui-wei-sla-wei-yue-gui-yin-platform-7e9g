@@ -6,6 +6,7 @@ export interface BreachFilters {
   status?: HandlingStatus | '';
   tier?: Tier | '';
   q?: string;
+  includeVoided?: boolean;
 }
 
 function toQuery(filters: BreachFilters, limit?: number): string {
@@ -14,6 +15,7 @@ function toQuery(filters: BreachFilters, limit?: number): string {
   if (filters.status) search.set('status', filters.status);
   if (filters.tier) search.set('tier', filters.tier);
   if (filters.q) search.set('q', filters.q);
+  if (filters.includeVoided) search.set('include_voided', 'true');
   if (limit) search.set('limit', String(limit));
   const qs = search.toString();
   return qs ? `?${qs}` : '';
@@ -28,10 +30,19 @@ export const breachesApi = {
       by_severity: Record<string, number>;
       by_status: Record<string, number>;
       severe_total: number;
+      voided: number;
       top_impact: string | null;
     }>('/api/breaches/summary'),
   detect: (days = 30, includePlanned = false) =>
-    api.post<{ scanned: number; created: number; updated: number; total: number }>('/api/breaches/detect', {
+    api.post<{
+      scanned: number;
+      created: number;
+      updated: number;
+      voided: number;
+      deleted: number;
+      revived: number;
+      total: number;
+    }>('/api/breaches/detect', {
       days,
       include_planned: includePlanned,
     }),

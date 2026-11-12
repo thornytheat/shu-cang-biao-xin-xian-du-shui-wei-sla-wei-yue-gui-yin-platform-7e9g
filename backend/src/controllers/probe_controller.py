@@ -28,9 +28,12 @@ def run_probes(
         detail={
             "created": result["created"],
             "missing": result["missing"],
+            "backfilled": result["backfilled"],
             "red_tables": result["red_tables"],
             "breaches_created": detection["created"],
             "breaches_updated": detection["updated"],
+            "breaches_voided": detection["voided"],
+            "breaches_deleted": detection["deleted"],
         },
         ip=request.client.host if request.client else None,
         message=f"巡检 {result['run_date']}：新增 {result['created']} 条探测，缺失 {result['missing']} 条",

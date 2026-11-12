@@ -19,15 +19,18 @@ def list_breaches(
     status: str | None = Query(default=None, pattern="^(open|claimed|resolved)$"),
     tier: str | None = Query(default=None, pattern="^(P0|P1|P2)$"),
     q: str | None = Query(default=None, max_length=64),
+    include_voided: bool = Query(default=False),
     limit: int = Query(default=100, ge=1, le=300),
     db: Session = Depends(get_db),
     principal: dict = Depends(principal_of),
 ):
-    rows = breach_service.query(db, severity=severity, status=status, tier=tier, keyword=q, limit=limit)
+    rows = breach_service.query(
+        db, severity=severity, status=status, tier=tier, keyword=q, include_voided=include_voided, limit=limit
+    )
     return {
         "items": [breach_service.serialize(breach, table) for breach, table in rows],
         "summary": breach_service.summary(db),
-        "filters": {"severity": severity, "status": status, "tier": tier, "q": q},
+        "filters": {"severity": severity, "status": status, "tier": tier, "q": q, "include_voided": include_voided},
     }
 
 
@@ -59,9 +62,15 @@ def detect_breaches(
         action="breach.detect",
         entity="sla_breach",
         entity_id=None,
-        detail={"window_days": payload.days, **{k: result[k] for k in ("scanned", "created", "updated")}},
+        detail={
+            "window_days": payload.days,
+            **{k: result[k] for k in ("scanned", "created", "updated", "voided", "deleted", "revived")},
+        },
         ip=request.client.host if request.client else None,
-        message=f"违约检测：扫描 {result['scanned']} 起，新增 {result['created']} 起",
+        message=(
+            f"违约检测：扫描 {result['scanned']} 起，新增 {result['created']} 起，"
+            f"误违约作废 {result['voided']} / 删除 {result['deleted']} 起"
+        ),
     )
     db.commit()
     return {**result, "summary": summary}

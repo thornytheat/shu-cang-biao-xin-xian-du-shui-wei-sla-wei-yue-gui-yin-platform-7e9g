@@ -1,6 +1,8 @@
 """表资产相关模型。"""
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -43,3 +45,11 @@ class TableChainOut(BaseModel):
     downstream: list[dict]
     tolerance_minutes: int
     probe_date: str | None = None
+
+
+class BackfillRequest(BaseModel):
+    """补录某分区的实际就绪时间（补采迟到对账）。"""
+
+    probe_date: date
+    actual_ready_at: datetime
+    note: str | None = Field(default=None, max_length=200)

@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { breachesApi } from '../api/breaches';
 import { EmptyState, ErrorState, LoadingBlock } from '../components/common/EmptyState';
-import { ConsecutiveTag, SeverityTag, StatusTag, TierTag } from '../components/common/SeverityTag';
+import { ConsecutiveTag, SeverityTag, StatusTag, TierTag, VoidedTag } from '../components/common/SeverityTag';
 import { HANDLING_LABELS, SEVERITY_LABELS, SEVERITY_ORDER } from '../constants/enums';
 import { can } from '../constants/roles';
 import { useAsync } from '../hooks/useAsync';
@@ -22,6 +22,7 @@ export function Breaches() {
   const [status, setStatus] = useState<HandlingStatus | ''>('');
   const [tier, setTier] = useState<Tier | ''>('');
   const [keyword, setKeyword] = useState(searchParams.get('q') ?? '');
+  const [showVoided, setShowVoided] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState('');
@@ -33,8 +34,9 @@ export function Breaches() {
         status: status || undefined,
         tier: tier || undefined,
         q: keyword || undefined,
+        includeVoided: showVoided || undefined,
       }),
-    [severity, status, tier, keyword],
+    [severity, status, tier, keyword, showVoided],
   );
 
   const canAct = can(user?.role, 'breach:claim');
@@ -46,7 +48,13 @@ export function Breaches() {
     setBusy('detect');
     try {
       const result = await breachesApi.detect(30, false);
-      toast(`检测完成：扫描 ${result.scanned} 起，新增 ${result.created} 起，更新 ${result.updated} 起`, 'ok');
+      toast(
+        `检测完成：扫描 ${result.scanned} 起，新增 ${result.created} 起，更新 ${result.updated} 起` +
+          (result.voided || result.deleted
+            ? `，误违约作废 ${result.voided} / 删除 ${result.deleted} 起`
+            : ''),
+        'ok',
+      );
       state.reload();
     } catch (err) {
       toast(`${describeError(err)}｜${permissionHint('breach:claim')}`, 'error');
@@ -109,7 +117,7 @@ export function Breaches() {
           <h2>违约台账</h2>
           <span className="count num">
             {summary?.total ?? '—'} 起 · 严重 {summary?.severe_total ?? '—'} 起 · 待认领{' '}
-            {summary?.by_status?.open ?? '—'} 起
+            {summary?.by_status?.open ?? '—'} 起 · 已作废 {summary?.voided ?? '—'} 起
           </span>
           <span className="spacer" style={{ flex: 1 }} />
           <div className="inline-actions">
@@ -176,10 +184,22 @@ export function Breaches() {
               setStatus('');
               setTier('');
               setKeyword('');
+              setShowVoided(false);
             }}
           >
             清空筛选
           </button>
+          <label
+            className="inline-actions"
+            style={{ gap: 6, fontSize: 12, color: 'var(--ink-300)', cursor: 'pointer', userSelect: 'none' }}
+          >
+            <input
+              type="checkbox"
+              checked={showVoided}
+              onChange={(event) => setShowVoided(event.target.checked)}
+            />
+            含已作废
+          </label>
         </div>
 
         {!canAct ? (
@@ -259,7 +279,7 @@ export function Breaches() {
                   return (
                     <Fragment key={item.id}>
                       <tr
-                        className={item.handling_status === 'open' ? 'is-open' : ''}
+                        className={item.is_voided ? 'is-voided' : item.handling_status === 'open' ? 'is-open' : ''}
                         onClick={() => setExpanded(isOpen ? null : item.id)}
                         style={{ cursor: 'pointer' }}
                       >
@@ -291,7 +311,7 @@ export function Breaches() {
                           {item.impact_score.toFixed(1)}
                         </td>
                         <td>
-                          <StatusTag status={item.handling_status} />
+                          {item.is_voided ? <VoidedTag reason={item.void_reason} /> : <StatusTag status={item.handling_status} />}
                           {item.claimed_by ? (
                             <div style={{ fontSize: 10.5, color: 'var(--ink-500)' }}>
                               {item.claimed_by.split('@')[0]}
@@ -305,7 +325,7 @@ export function Breaches() {
                               className="btn btn-ghost"
                               style={{ padding: '3px 8px', fontSize: 11.5 }}
                               onClick={() => onClaim(item)}
-                              disabled={busy === `claim-${item.id}` || item.handling_status !== 'open'}
+                              disabled={busy === `claim-${item.id}` || item.handling_status !== 'open' || item.is_voided}
                             >
                               {busy === `claim-${item.id}` ? '…' : '认领'}
                             </button>
@@ -380,6 +400,20 @@ export function Breaches() {
                                     复盘结论：{item.root_note}
                                   </div>
                                 ) : null}
+                                {item.is_voided ? (
+                                  <div
+                                    style={{
+                                      marginTop: 8,
+                                      padding: '6px 8px',
+                                      fontSize: 12,
+                                      color: 'var(--ink-300)',
+                                      border: '1px dashed var(--line-strong)',
+                                      borderRadius: 'var(--radius-tight)',
+                                    }}
+                                  >
+                                    <VoidedTag /> 作废于 {shortDateTime(item.voided_at)}：{item.void_reason}
+                                  </div>
+                                ) : null}
                                 <div className="field" style={{ marginTop: 10 }}>
                                   <label htmlFor={`note-${item.id}`}>复盘结论</label>
                                   <textarea
@@ -388,13 +422,18 @@ export function Breaches() {
                                     value={note}
                                     onChange={(event) => setNote(event.target.value)}
                                     placeholder="如：上游 ods.loan_event 01:00 批次因核心系统批量延迟 59.5 分钟"
+                                    disabled={item.is_voided}
                                   />
                                 </div>
                                 <button
                                   type="button"
                                   className="btn"
                                   onClick={() => onResolve(item)}
-                                  disabled={busy === `resolve-${item.id}` || item.handling_status === 'resolved'}
+                                  disabled={
+                                    busy === `resolve-${item.id}` ||
+                                    item.handling_status === 'resolved' ||
+                                    item.is_voided
+                                  }
                                 >
                                   {busy === `resolve-${item.id}` ? '提交中…' : '提交复盘'}
                                 </button>

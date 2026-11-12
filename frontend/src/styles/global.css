@@ -524,6 +524,11 @@ input[type='number'] {
   color: var(--signal);
   border-color: oklch(0.788 0.062 205 / 0.45);
 }
+.tag.tag-voided {
+  color: var(--ink-500);
+  border-color: var(--line-strong);
+  background: oklch(0.268 0.014 250 / 0.5);
+}
 
 /* ---------------- 看板三栏 ---------------- */
 .board-grid {
@@ -678,6 +683,14 @@ input[type='number'] {
 
 .ledger tbody tr.is-open td:first-child {
   box-shadow: inset 2px 0 0 var(--lamp-red);
+}
+
+.ledger tbody tr.is-voided {
+  opacity: 0.48;
+}
+
+.ledger tbody tr.is-voided td:first-child {
+  box-shadow: inset 2px 0 0 var(--ink-500);
 }
 
 .ledger .num-cell {

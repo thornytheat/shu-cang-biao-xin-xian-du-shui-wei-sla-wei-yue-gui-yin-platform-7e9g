@@ -4,7 +4,7 @@ import { breachesApi } from '../api/breaches';
 import { tablesApi } from '../api/tables';
 import { DelayCurve } from '../components/common/DelayCurve';
 import { EmptyState, ErrorState, LoadingBlock } from '../components/common/EmptyState';
-import { ConsecutiveTag, SeverityTag, StatusTag, TierTag } from '../components/common/SeverityTag';
+import { ConsecutiveTag, SeverityTag, StatusTag, TierTag, VoidedTag } from '../components/common/SeverityTag';
 import { TierLamp } from '../components/common/TierLamp';
 import { WaterBar } from '../components/common/WaterBar';
 import { LAYER_LABELS, GRADE_LABELS, GRADE_HINTS, PROBE_STATUS_LABELS } from '../constants/enums';
@@ -21,20 +21,28 @@ export function TableDetail() {
   const { user } = useAuth();
   const { toast } = useToasts();
   const series = useAsync(() => tablesApi.series(code, 30), [code]);
-  const breaches = useAsync(() => breachesApi.list({ q: code }), [code]);
+  const breaches = useAsync(() => breachesApi.list({ q: code, includeVoided: true }), [code]);
 
   const [clock, setClock] = useState('');
   const [reports, setReports] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
+  const [bfDate, setBfDate] = useState('');
+  const [bfTime, setBfTime] = useState('');
+  const [bfNote, setBfNote] = useState('');
+  const [bfBusy, setBfBusy] = useState(false);
+
   useEffect(() => {
     if (series.data) {
       setClock(series.data.table.expected_ready_clock);
       setReports(series.data.table.report_count);
+      setBfDate(series.data.evaluation.latest?.probe_date ?? '');
+      setBfTime(series.data.table.expected_ready_clock);
     }
   }, [series.data]);
 
   const canEdit = can(user?.role, 'table:write');
+  const canBackfill = can(user?.role, 'probe:run');
 
   async function onSave() {
     setSaving(true);
@@ -46,6 +54,37 @@ export function TableDetail() {
       toast(`${describeError(err)}｜${permissionHint('table:write')}`, 'error');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onBackfill() {
+    if (!bfDate || !bfTime) {
+      toast('请填写分区日期与实际就绪时间', 'error');
+      return;
+    }
+    setBfBusy(true);
+    try {
+      const result = await tablesApi.backfill(code, {
+        probe_date: bfDate,
+        actual_ready_at: `${bfDate} ${bfTime}`,
+        note: bfNote || undefined,
+      });
+      const before = result.before?.delay_minutes;
+      const detection = result.breaches;
+      toast(
+        `已补录 ${result.probe_date}：延迟 ${before ?? '—'} → ${result.after.delay_minutes} 分钟` +
+          (detection
+            ? `；台账重算：作废 ${detection.voided} · 删除 ${detection.deleted} · 更新 ${detection.updated}`
+            : ''),
+        'ok',
+      );
+      setBfNote('');
+      series.reload();
+      breaches.reload();
+    } catch (err) {
+      toast(`${describeError(err)}｜${permissionHint('probe:run')}`, 'error');
+    } finally {
+      setBfBusy(false);
     }
   }
 
@@ -75,6 +114,9 @@ export function TableDetail() {
   const evaluation = data.evaluation;
   const stats = data.stats;
   const chain = data.chain;
+  const breachItems = breaches.data?.items ?? [];
+  const activeBreachCount = breachItems.filter((item) => !item.is_voided).length;
+  const voidedBreachCount = breachItems.length - activeBreachCount;
 
   return (
     <>
@@ -217,6 +259,57 @@ export function TableDetail() {
 
           <section className="section">
             <div className="section-head">
+              <h2>补录就绪时间</h2>
+              <span className="count num">补采迟到对账</span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--ink-400)', lineHeight: 1.6 }}>
+              就绪事件补采迟到时，按分区补录实际就绪时间；保存后自动重算该日及后续连续违约——
+              未处置的误违约删除，已认领/复盘的标作废并保留处置痕迹。
+            </div>
+            <div className="inline-actions">
+              <div className="field">
+                <label htmlFor="bf-date">分区日期</label>
+                <input
+                  id="bf-date"
+                  type="date"
+                  value={bfDate}
+                  onChange={(event) => setBfDate(event.target.value)}
+                  style={{ width: 142 }}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="bf-time">实际就绪</label>
+                <input
+                  id="bf-time"
+                  type="time"
+                  value={bfTime}
+                  onChange={(event) => setBfTime(event.target.value)}
+                  style={{ width: 96 }}
+                />
+              </div>
+              <button type="button" className="btn" onClick={onBackfill} disabled={bfBusy}>
+                {bfBusy ? '补录中…' : '补录并重算'}
+              </button>
+            </div>
+            <div className="field">
+              <label htmlFor="bf-note">备注（可选）</label>
+              <input
+                id="bf-note"
+                type="text"
+                value={bfNote}
+                onChange={(event) => setBfNote(event.target.value)}
+                placeholder="如：调度系统 03:30 就绪事件补采迟到"
+              />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>
+              {canBackfill
+                ? '幂等：重复提交不新增记录、不重复升级；巡检不会覆盖人工补录'
+                : permissionHint('probe:run')}
+            </div>
+          </section>
+
+          <section className="section">
+            <div className="section-head">
               <h2>上游链</h2>
               <span className="count num">{chain.nodes.length} 跳</span>
             </div>
@@ -312,7 +405,9 @@ export function TableDetail() {
       <section className="section">
         <div className="section-head">
           <h2>这张表的违约记录</h2>
-          <span className="count num">{breaches.data?.items.length ?? 0} 起</span>
+          <span className="count num">
+            {activeBreachCount} 起{voidedBreachCount > 0 ? ` · 已作废 ${voidedBreachCount} 起` : ''}
+          </span>
           <span className="spacer" style={{ flex: 1 }} />
           <Link className="btn btn-ghost" to={`/breaches?q=${encodeURIComponent(code)}`}>
             在台账中打开 →
@@ -340,7 +435,7 @@ export function TableDetail() {
             </thead>
             <tbody>
               {breaches.data.items.map((item) => (
-                <tr key={item.id}>
+                <tr key={item.id} className={item.is_voided ? 'is-voided' : ''}>
                   <td className="num">{shortDate(item.breach_date)}</td>
                   <td className="num">
                     {trimZero(item.delay_minutes)} 分 / {formatRatio(item.ratio)}
@@ -359,7 +454,11 @@ export function TableDetail() {
                   </td>
                   <td className="num-cell">{item.impact_score.toFixed(1)}</td>
                   <td>
-                    <StatusTag status={item.handling_status} />
+                    {item.is_voided ? (
+                      <VoidedTag reason={item.void_reason} />
+                    ) : (
+                      <StatusTag status={item.handling_status} />
+                    )}
                   </td>
                 </tr>
               ))}

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from src.constants.enums import AttributionCause, BreachSeverity
+from src.constants.enums import AttributionCause, BreachSeverity, HandlingStatus
 from src.constants.limits import (
     DEFAULT_ESCALATE_AFTER,
     IMPACT_WEIGHT_CONTRIBUTION,
@@ -92,6 +92,32 @@ def next_streak(previous_date: date | None, current_date: date, streak: int) -> 
     if previous_date is not None and (current_date - previous_date).days == 1:
         return streak + 1
     return 1
+
+
+# ---------- 误违约对账（补采迟到重算） ----------
+
+RECONCILE_KEEP = "keep"
+RECONCILE_DELETE = "delete"
+RECONCILE_VOID = "void"
+RECONCILE_REVIVE = "revive"
+
+
+def reconcile_action(*, is_candidate: bool, handling_status: str, is_voided: bool) -> str:
+    """台账记录与最新检测结论的对账决策（纯函数，detect 复用，幂等）。
+
+    - 仍是违约候选：已作废 → revive（复活并更新为新口径）；否则 keep（正常 upsert）。
+    - 不再是违约（误违约，如补采迟到的就绪事件回补后）：
+        已作废 → keep（保持原作废痕迹，不重复作废）；
+        未处置(open) → delete（从待办消失，无痕迹）；
+        已认领/已复盘 → void（保留处置痕迹，标为作废）。
+    """
+    if is_candidate:
+        return RECONCILE_REVIVE if is_voided else RECONCILE_KEEP
+    if is_voided:
+        return RECONCILE_KEEP
+    if handling_status == HandlingStatus.OPEN.value:
+        return RECONCILE_DELETE
+    return RECONCILE_VOID
 
 
 def resolve_primary(nodes: list[dict]) -> dict:

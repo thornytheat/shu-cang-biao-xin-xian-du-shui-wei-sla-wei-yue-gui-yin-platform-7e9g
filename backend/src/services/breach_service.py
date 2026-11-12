@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.constants.enums import BreachSeverity, HandlingStatus, ProbeStatus, Tier
@@ -171,6 +171,14 @@ def build_action(
     )
 
 
+def scan_window(db: Session, *, days: int, include_planned: bool) -> tuple[date, date]:
+    """检测窗口 [start, end]：与 scan 同一口径，detect 用它限定对账范围。"""
+    today = business_today()
+    latest_date = db.scalar(select(func.max(FreshnessProbe.probe_date))) or today
+    end = max(latest_date, today) if include_planned else latest_date
+    return end - timedelta(days=days - 1), end
+
+
 def scan(
     db: Session,
     *,
@@ -191,9 +199,7 @@ def scan(
     all_probes = list(
         db.scalars(select(FreshnessProbe).order_by(FreshnessProbe.table_id, FreshnessProbe.probe_date))
     )
-    latest_date = max((probe.probe_date for probe in all_probes), default=today)
-    end = max(latest_date, today) if include_planned else latest_date
-    start = end - timedelta(days=days - 1)
+    start, end = scan_window(db, days=days, include_planned=include_planned)
 
     grouped: dict[int, list[FreshnessProbe]] = {}
     for probe in all_probes:
@@ -262,11 +268,33 @@ def scan(
     return candidates
 
 
+def _void_reason(breach: SlaBreach) -> str:
+    delay_minutes = round(breach.delay_seconds / 60.0, 1)
+    return (
+        "误违约作废：实际就绪时间补录后重算，该日不再违约"
+        f"（原延迟 {delay_minutes} 分钟 / 原连续 {breach.consecutive_count} 天 / 原等级 {breach.severity}）"
+    )
+
+
 def detect(db: Session, *, days: int = BREACH_SCAN_DAYS, include_planned: bool = False) -> dict:
-    """检测 + upsert（自然键 table_id + breach_date），保留人工处置字段。"""
+    """检测 + upsert（自然键 table_id + breach_date），保留人工处置字段。
+
+    补采迟到对账：窗口内已落库但本次不再是候选的记录判定为误违约——
+    未处置(open)的直接删除（从待办消失）；已认领/已复盘的标作废（保留处置痕迹）；
+    已作废但重新成为候选的复活。重复运行不新增记录、不重复升级（连续次数由 scan 全量重算）。
+    """
     policy_rows = policies(db)
     candidates = scan(db, days=days, include_planned=include_planned)
-    created = updated = 0
+    start, end = scan_window(db, days=days, include_planned=include_planned)
+
+    pending: dict[tuple[int, date], SlaBreach] = {
+        (row.table_id, row.breach_date): row
+        for row in db.scalars(
+            select(SlaBreach).where(SlaBreach.breach_date >= start, SlaBreach.breach_date <= end)
+        )
+    }
+
+    created = updated = voided = deleted = revived = 0
     severe = escalated = warning = 0
 
     for candidate in candidates:
@@ -288,12 +316,7 @@ def detect(db: Session, *, days: int = BREACH_SCAN_DAYS, include_planned: bool =
         else:
             warning += 1
 
-        existing = db.scalar(
-            select(SlaBreach).where(
-                SlaBreach.table_id == candidate.table.id,
-                SlaBreach.breach_date == candidate.breach_date,
-            )
-        )
+        existing = pending.pop((candidate.table.id, candidate.breach_date), None)
         payload = {
             "delay_seconds": candidate.delay_seconds,
             "tolerance_minutes": candidate.tolerance_minutes,
@@ -312,17 +335,41 @@ def detect(db: Session, *, days: int = BREACH_SCAN_DAYS, include_planned: bool =
             db.add(SlaBreach(table_id=candidate.table.id, breach_date=candidate.breach_date, **payload))
             created += 1
         else:
+            if existing.voided_at is not None:
+                # 复活：作废后重新成为候选（如补录值又被修正回迟到）
+                existing.voided_at = None
+                existing.void_reason = None
+                revived += 1
             for key, value in payload.items():
                 if key == "probe_id" and existing.probe_id is not None:
                     continue
                 setattr(existing, key, value)
             updated += 1
 
+    # 窗口内剩余记录 = 本次检测已不违约 → 误违约对账
+    now = business_now()
+    for stale in pending.values():
+        action = breach_core.reconcile_action(
+            is_candidate=False,
+            handling_status=stale.handling_status,
+            is_voided=stale.voided_at is not None,
+        )
+        if action == breach_core.RECONCILE_DELETE:
+            db.delete(stale)
+            deleted += 1
+        elif action == breach_core.RECONCILE_VOID:
+            stale.voided_at = now
+            stale.void_reason = _void_reason(stale)
+            voided += 1
+
     db.flush()
     return {
         "scanned": len(candidates),
         "created": created,
         "updated": updated,
+        "voided": voided,
+        "deleted": deleted,
+        "revived": revived,
         "total": created + updated,
         "budget": {"warning": warning, "severe": severe, "escalated": escalated},
         "window_days": days,
@@ -336,14 +383,19 @@ def query(
     status: str | None = None,
     tier: str | None = None,
     keyword: str | None = None,
+    include_voided: bool = False,
     limit: int = 200,
 ) -> list[tuple[SlaBreach, TableAsset]]:
+    """台账查询：默认只返回有效违约（active 口径，与看板/导出一致）；
+    include_voided=True 时含已作废记录（保留处置痕迹，前端标灰展示）。"""
     stmt = (
         select(SlaBreach, TableAsset)
         .join(TableAsset, TableAsset.id == SlaBreach.table_id)
         .order_by(SlaBreach.breach_date.desc(), SlaBreach.impact_score.desc())
         .limit(limit)
     )
+    if not include_voided:
+        stmt = stmt.where(SlaBreach.voided_at.is_(None))
     if severity:
         stmt = stmt.where(SlaBreach.severity == severity)
     if status:
@@ -387,22 +439,25 @@ def resolve(db: Session, breach: SlaBreach, actor_email: str, note: str | None) 
 
 
 def summary(db: Session) -> dict:
+    """汇总：只统计有效违约（active）；作废记录单独计数，不进严重度/处置态分布。"""
     rows = list(db.scalars(select(SlaBreach)))
+    active = [row for row in rows if row.voided_at is None]
     counters = {item.value: 0 for item in BreachSeverity}
     statuses = {item.value: 0 for item in HandlingStatus}
-    for row in rows:
+    for row in active:
         counters[row.severity] = counters.get(row.severity, 0) + 1
         statuses[row.handling_status] = statuses.get(row.handling_status, 0) + 1
-    top = max(rows, key=lambda row: row.impact_score) if rows else None
+    top = max(active, key=lambda row: row.impact_score) if active else None
     top_code = None
     if top is not None:
         top_table = db.get(TableAsset, top.table_id)
         top_code = top_table.code if top_table else None
     return {
-        "total": len(rows),
+        "total": len(active),
         "by_severity": counters,
         "by_status": statuses,
         "severe_total": counters.get(BreachSeverity.SEVERE.value, 0) + counters.get(BreachSeverity.ESCALATED.value, 0),
+        "voided": len(rows) - len(active),
         "top_impact": top_code,
     }
 
@@ -433,6 +488,9 @@ def serialize(breach: SlaBreach, table: TableAsset | None) -> dict:
         "claimed_at": breach.claimed_at.isoformat(sep=" ") if breach.claimed_at else None,
         "resolved_at": breach.resolved_at.isoformat(sep=" ") if breach.resolved_at else None,
         "root_note": breach.root_note,
+        "is_voided": breach.voided_at is not None,
+        "voided_at": breach.voided_at.isoformat(sep=" ") if breach.voided_at else None,
+        "void_reason": breach.void_reason,
         "report_count": table.report_count if table else 0,
         "expected_ready_clock": table.expected_ready_clock if table else "",
     }

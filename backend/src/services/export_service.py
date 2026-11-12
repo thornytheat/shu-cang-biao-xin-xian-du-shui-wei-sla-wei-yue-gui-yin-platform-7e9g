@@ -54,7 +54,7 @@ def breaches_csv(
     actor_email: str = "",
 ) -> tuple[str, int, str]:
     rows = breach_service.query(
-        db, severity=severity, status=status, tier=tier, keyword=keyword, limit=500
+        db, severity=severity, status=status, tier=tier, keyword=keyword, include_voided=False, limit=500
     )
     if not rows:
         raise AppError("EXPORT_EMPTY", 422, detail={"filters": {"severity": severity, "status": status}})
@@ -91,17 +91,23 @@ def breaches_csv(
 
 
 def review_markdown(db: Session, *, days: int = 30) -> tuple[str, int, str]:
-    rows = breach_service.query(db, limit=500)
+    # 与台账/看板同一口径：只导出有效违约；作废记录保留在台账里，不进复盘
+    rows = breach_service.query(db, include_voided=False, limit=500)
     if not rows:
         raise AppError("EXPORT_EMPTY", 422, detail={"scope": "breaches"})
 
     severe = [item for item in rows if item[0].severity in {BreachSeverity.SEVERE.value, BreachSeverity.ESCALATED.value}]
+    voided_total = breach_service.summary(db).get("voided", 0)
     lines = [
         "# SLA 违约复盘 · 澜河银行数据平台运营组",
         "",
         f"- 生成时间：{business_now().strftime('%Y-%m-%d %H:%M')}",
         f"- 统计窗口：近 {days} 天",
         f"- 违约总数：**{len(rows)}** 起（严重 {len(severe)} 起）",
+    ]
+    if voided_total:
+        lines.append(f"- 补采误报已作废：{voided_total} 起（保留处置痕迹，不纳入本复盘）")
+    lines += [
         "",
         "## 一、违约明细",
         "",

@@ -11,6 +11,15 @@ export function StatusTag({ status }: { status: HandlingStatus }) {
   return <span className={`tag status-${status}`}>{HANDLING_LABELS[status] ?? status}</span>;
 }
 
+/** 作废标签：补采迟到的误违约对账后保留处置痕迹的记录。 */
+export function VoidedTag({ reason }: { reason?: string | null }) {
+  return (
+    <span className="tag tag-voided" title={reason ?? '该记录已作废'}>
+      已作废
+    </span>
+  );
+}
+
 /** 等级标签：P0/P1/P2。 */
 export function TierTag({ tier }: { tier: string }) {
   return <span className={`tag tier-${tier}`}>{tier}</span>;

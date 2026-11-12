@@ -29,6 +29,9 @@ class BreachOut(BaseModel):
     claimed_at: str | None = None
     resolved_at: str | None = None
     root_note: str | None = None
+    is_voided: bool = False
+    voided_at: str | None = None
+    void_reason: str | None = None
     report_count: int
     expected_ready_clock: str
 
@@ -51,6 +54,9 @@ class DetectResponse(BaseModel):
     scanned: int
     created: int
     updated: int
+    voided: int = 0
+    deleted: int = 0
+    revived: int = 0
     total: int
     budget: dict
     window_days: int
@@ -67,6 +73,7 @@ class ProbeRunResponse(BaseModel):
     late: int
     early: int
     ok: int
+    backfilled: int = 0
     red_tables: list[str]
     red_count: int
     duration_ms: int

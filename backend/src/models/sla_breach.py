@@ -39,6 +39,10 @@ class SlaBreach(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     root_note: Mapped[str | None] = mapped_column(Text, nullable=True, comment="复盘结论")
+    voided_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, comment="作废时间（补采迟到重算后判定为误违约）"
+    )
+    void_reason: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="作废原因")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()

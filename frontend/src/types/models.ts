@@ -234,6 +234,9 @@ export interface Breach {
   claimed_at: string | null;
   resolved_at: string | null;
   root_note: string | null;
+  is_voided: boolean;
+  voided_at: string | null;
+  void_reason: string | null;
   report_count: number;
   expected_ready_clock: string;
 }
@@ -245,6 +248,7 @@ export interface BreachList {
     by_severity: Record<BreachSeverity, number>;
     by_status: Record<HandlingStatus, number>;
     severe_total: number;
+    voided: number;
     top_impact: string | null;
   };
   filters: Record<string, string | null>;
@@ -260,6 +264,7 @@ export interface ProbeRunResult {
   late: number;
   early: number;
   ok: number;
+  backfilled: number;
   red_tables: string[];
   red_count: number;
   duration_ms: number;
@@ -268,10 +273,49 @@ export interface ProbeRunResult {
     scanned: number;
     created: number;
     updated: number;
+    voided: number;
+    deleted: number;
+    revived: number;
     total: number;
     budget: { warning: number; severe: number; escalated: number };
     window_days: number;
     summary: Record<string, unknown>;
+  } | null;
+}
+
+export interface BackfillResult {
+  table_code: string;
+  probe_date: string;
+  partition_dt: string;
+  created: boolean;
+  before: {
+    actual_ready_at: string | null;
+    delay_minutes: number | null;
+    status: string;
+    source: string;
+  } | null;
+  after: {
+    actual_ready_at: string | null;
+    delay_minutes: number;
+    status: string;
+    is_early: boolean;
+  };
+  breaches: {
+    scanned: number;
+    created: number;
+    updated: number;
+    voided: number;
+    deleted: number;
+    revived: number;
+    total: number;
+    budget: { warning: number; severe: number; escalated: number };
+    window_days: number;
+    summary: {
+      total: number;
+      severe_total: number;
+      voided: number;
+      by_status: Record<string, number>;
+    };
   } | null;
 }
 

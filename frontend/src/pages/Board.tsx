@@ -144,6 +144,9 @@ export function Board() {
                 <span>
                   违约检测：扫描 {runResult.breaches.scanned} · 新增 {runResult.breaches.created} · 更新{' '}
                   {runResult.breaches.updated}
+                  {runResult.breaches.voided || runResult.breaches.deleted
+                    ? ` · 误违约作废 ${runResult.breaches.voided} / 删除 ${runResult.breaches.deleted}`
+                    : ''}
                 </span>
               ) : null}
             </div>

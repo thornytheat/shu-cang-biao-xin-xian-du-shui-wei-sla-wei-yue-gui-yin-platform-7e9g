@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { Board, TableSeries } from '../types/models';
+import type { BackfillResult, Board, TableSeries } from '../types/models';
 
 export interface TableSummary {
   code: string;
@@ -36,4 +36,6 @@ export const tablesApi = {
     api.get<TableSeries>(`/api/tables/${encodeURIComponent(code)}/freshness?days=${days}`),
   update: (code: string, payload: Record<string, unknown>) =>
     api.patch<TableSeries>(`/api/tables/${encodeURIComponent(code)}`, payload),
+  backfill: (code: string, payload: { probe_date: string; actual_ready_at: string; note?: string }) =>
+    api.post<BackfillResult>(`/api/tables/${encodeURIComponent(code)}/backfill`, payload),
 };
