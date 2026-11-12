@@ -1,0 +1,60 @@
+/* freshsla 设计令牌：机房「值班挂板」——深石板灰 + 低饱和交通灯 + 等宽数字
+   色板全部用 oklch()；不使用纯黑/纯白、不使用紫蓝渐变或玻璃拟态。 */
+:root {
+  /* 深石板灰（非纯黑） */
+  --ink-950: oklch(0.195 0.011 250);
+  --ink-925: oklch(0.214 0.012 250);
+  --ink-900: oklch(0.238 0.013 250);
+  --ink-850: oklch(0.268 0.014 250);
+  --ink-800: oklch(0.305 0.014 250);
+  --ink-700: oklch(0.362 0.013 250);
+  --ink-600: oklch(0.452 0.012 250);
+  --ink-500: oklch(0.556 0.010 250);
+  --ink-400: oklch(0.652 0.009 250);
+  --ink-300: oklch(0.742 0.008 250);
+
+  /* 挂板纸面（非纯白） */
+  --paper-100: oklch(0.896 0.006 245);
+  --paper-50: oklch(0.938 0.005 245);
+
+  /* 低饱和交通灯三色 */
+  --lamp-green: oklch(0.742 0.088 154);
+  --lamp-green-dim: oklch(0.742 0.088 154 / 0.16);
+  --lamp-yellow: oklch(0.822 0.098 92);
+  --lamp-yellow-dim: oklch(0.822 0.098 92 / 0.16);
+  --lamp-red: oklch(0.638 0.148 27);
+  --lamp-red-dim: oklch(0.638 0.148 27 / 0.18);
+  --lamp-off: oklch(0.505 0.012 250);
+  --lamp-off-dim: oklch(0.505 0.012 250 / 0.14);
+
+  /* 冷青仅用于“当前水位/选中态”细线，不做渐变 */
+  --signal: oklch(0.788 0.062 205);
+  --signal-dim: oklch(0.788 0.062 205 / 0.14);
+
+  /* 发丝线（值班日志横线） */
+  --line: oklch(0.386 0.011 250 / 0.62);
+  --line-soft: oklch(0.386 0.011 250 / 0.3);
+  --line-strong: oklch(0.412 0.012 250 / 0.86);
+
+  --font-display: 'Sora', 'Noto Sans SC', ui-sans-serif, sans-serif;
+  --font-body: 'Noto Sans SC', 'Sora', ui-sans-serif, sans-serif;
+
+  --step-xs: 11px;
+  --step-sm: 12.5px;
+  --step-md: 14px;
+  --step-lg: 16px;
+  --step-xl: clamp(19px, 1.2vw, 23px);
+  --step-2xl: clamp(26px, 2vw, 34px);
+
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 16px;
+  --gap-5: 22px;
+  --gap-6: 30px;
+  --gap-7: 44px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --rail-w: 226px;
+  --radius-tight: 2px;
+}
